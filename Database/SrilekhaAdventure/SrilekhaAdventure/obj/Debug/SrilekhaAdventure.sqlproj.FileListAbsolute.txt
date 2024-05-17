@@ -1,0 +1,10 @@
+C:\Users\SrilekhaBandlamudi\source\repos\SrilekhaAdventure\SrilekhaAdventure\bin\Debug\SrilekhaAdventure.dacpac
+C:\Users\SrilekhaBandlamudi\source\repos\SrilekhaAdventure\SrilekhaAdventure\bin\Debug\SrilekhaAdventure.dll
+C:\Users\SrilekhaBandlamudi\source\repos\SrilekhaAdventure\SrilekhaAdventure\bin\Debug\SrilekhaAdventure.pdb
+C:\Users\SrilekhaBandlamudi\source\repos\SrilekhaAdventure\SrilekhaAdventure\obj\Debug\SrilekhaAdventure.sqlprojAssemblyReference.cache
+C:\Users\SrilekhaBandlamudi\source\repos\SrilekhaAdventure\SrilekhaAdventure\obj\Debug\Model.xml
+C:\Users\SrilekhaBandlamudi\source\repos\SrilekhaAdventure\SrilekhaAdventure\obj\Debug\refactor.xml
+C:\Users\SrilekhaBandlamudi\source\repos\SrilekhaAdventure\SrilekhaAdventure\obj\Debug\postdeploy.sql
+C:\Users\SrilekhaBandlamudi\source\repos\SrilekhaAdventure\SrilekhaAdventure\obj\Debug\predeploy.sql
+C:\Users\SrilekhaBandlamudi\source\repos\SrilekhaAdventure\SrilekhaAdventure\obj\Debug\SrilekhaAdventure.dll
+C:\Users\SrilekhaBandlamudi\source\repos\SrilekhaAdventure\SrilekhaAdventure\obj\Debug\SrilekhaAdventure.pdb

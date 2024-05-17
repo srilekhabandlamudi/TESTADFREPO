@@ -1,0 +1,2 @@
+﻿CREATE USER [test-learn-mi] FOR EXTERNAL PROVIDER;
+
