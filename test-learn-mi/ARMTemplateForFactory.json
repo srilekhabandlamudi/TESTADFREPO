@@ -1,0 +1,1450 @@
+{
+	"$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+	"contentVersion": "1.0.0.0",
+	"parameters": {
+		"factoryName": {
+			"type": "string",
+			"metadata": "Data Factory name",
+			"defaultValue": "test-learn-mi"
+		},
+		"AzureSqlDatabase1_connectionString": {
+			"type": "secureString",
+			"metadata": "Secure string for 'connectionString' of 'AzureSqlDatabase1'"
+		},
+		"AzureSqlMI1_connectionString": {
+			"type": "secureString",
+			"metadata": "Secure string for 'connectionString' of 'AzureSqlMI1'"
+		},
+		"SqlServer1_connectionString": {
+			"type": "secureString",
+			"metadata": "Secure string for 'connectionString' of 'SqlServer1'"
+		}
+	},
+	"variables": {
+		"factoryId": "[concat('Microsoft.DataFactory/factories/', parameters('factoryName'))]"
+	},
+	"resources": [
+		{
+			"name": "[concat(parameters('factoryName'), '/PL_Logging')]",
+			"type": "Microsoft.DataFactory/factories/pipelines",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"description": "Pipeline for capturing logs of each activity during pipeline run",
+				"activities": [
+					{
+						"name": "If Debug",
+						"description": "If activity to identify pipeline runtype",
+						"type": "IfCondition",
+						"dependsOn": [],
+						"userProperties": [],
+						"typeProperties": {
+							"expression": {
+								"value": "@equals(toLower(pipeline().parameters.P_run_type),'debug')",
+								"type": "Expression"
+							},
+							"ifFalseActivities": [
+								{
+									"name": "trigger_activityruns",
+									"description": "Web Activity to call trigger RestAPI of ADF",
+									"type": "WebActivity",
+									"dependsOn": [],
+									"policy": {
+										"timeout": "7.00:00:00",
+										"retry": 0,
+										"retryIntervalInSeconds": 30,
+										"secureOutput": false,
+										"secureInput": false
+									},
+									"userProperties": [],
+									"typeProperties": {
+										"method": "POST",
+										"headers": {},
+										"url": {
+											"value": "@{concat('https://management.azure.com/subscriptions/',pipeline().globalParameters.SubscriptionID,'/resourceGroups/',pipeline().globalParameters.ResourceGroupName,'/providers/Microsoft.DataFactory/factories/',pipeline().DataFactory)}/pipelineruns/@{pipeline().parameters.P_runid}/queryActivityruns?api-version=2018-06-01",
+											"type": "Expression"
+										},
+										"body": {
+											"value": "{\n  \"lastUpdatedAfter\": \"@{formatDateTime(pipeline().parameters.P_start_time)}\",\n  \"lastUpdatedBefore\": \"@{formatDateTime(pipeline().parameters.P_end_time)}\"\n}",
+											"type": "Expression"
+										},
+										"authentication": {
+											"type": "MSI",
+											"resource": "https://management.azure.com"
+										}
+									}
+								},
+								{
+									"name": "sp_pipeline logger_Trigger",
+									"description": "Stored Procedure Activity to insert logs data into common.ADFLogs",
+									"type": "SqlServerStoredProcedure",
+									"dependsOn": [
+										{
+											"activity": "trigger_activityruns",
+											"dependencyConditions": [
+												"Succeeded"
+											]
+										}
+									],
+									"policy": {
+										"timeout": "7.00:00:00",
+										"retry": 0,
+										"retryIntervalInSeconds": 30,
+										"secureOutput": false,
+										"secureInput": false
+									},
+									"userProperties": [],
+									"typeProperties": {
+										"storedProcedureName": "[[common].[usp_ADFPipelineLogger]",
+										"storedProcedureParameters": {
+											"batch_id": {
+												"value": {
+													"value": "@pipeline().parameters.P_batch_id",
+													"type": "Expression"
+												},
+												"type": "Int64"
+											},
+											"custom_identifier": {
+												"value": {
+													"value": "@pipeline().parameters.P_custom_identifier",
+													"type": "Expression"
+												},
+												"type": "String"
+											},
+											"json_value": {
+												"value": {
+													"value": "@{string(activity('trigger_activityruns').output)}",
+													"type": "Expression"
+												},
+												"type": "String"
+											}
+										}
+									},
+									"linkedServiceName": {
+										"referenceName": "AzureSqlMI1",
+										"type": "LinkedServiceReference"
+									}
+								}
+							],
+							"ifTrueActivities": [
+								{
+									"name": "debug_sandboxactivityruns",
+									"description": "Web Activity to call debug RestAPI of ADF",
+									"type": "WebActivity",
+									"dependsOn": [],
+									"policy": {
+										"timeout": "7.00:00:00",
+										"retry": 0,
+										"retryIntervalInSeconds": 30,
+										"secureOutput": false,
+										"secureInput": false
+									},
+									"userProperties": [],
+									"typeProperties": {
+										"method": "GET",
+										"headers": {},
+										"httpRequestTimeout": "",
+										"url": {
+											"value": "@{concat('https://management.azure.com/subscriptions/',pipeline().globalParameters.SubscriptionID,'/resourceGroups/',pipeline().globalParameters.ResourceGroupName,'/providers/Microsoft.DataFactory/factories/',pipeline().DataFactory)}/sandboxpipelineruns/@{pipeline().parameters.P_runid}/sandboxActivityRuns?startTime=@{formatDateTime(pipeline().parameters.P_start_time)}&endTime=@{formatDateTime(pipeline().parameters.P_end_time)}&api-version=2017-09-01-preview",
+											"type": "Expression"
+										},
+										"authentication": {
+											"type": "MSI",
+											"resource": "https://management.azure.com"
+										}
+									}
+								},
+								{
+									"name": "sp_pipeline logger",
+									"description": "Stored Procedure Activity to insert logs data into common.ADFLogs",
+									"type": "SqlServerStoredProcedure",
+									"dependsOn": [
+										{
+											"activity": "debug_sandboxactivityruns",
+											"dependencyConditions": [
+												"Succeeded"
+											]
+										}
+									],
+									"policy": {
+										"timeout": "7.00:00:00",
+										"retry": 0,
+										"retryIntervalInSeconds": 30,
+										"secureOutput": false,
+										"secureInput": false
+									},
+									"userProperties": [],
+									"typeProperties": {
+										"storedProcedureName": "[[common].[usp_ADFPipelineLogger]",
+										"storedProcedureParameters": {
+											"batch_id": {
+												"value": {
+													"value": "@pipeline().parameters.P_batch_id",
+													"type": "Expression"
+												},
+												"type": "Int64"
+											},
+											"custom_identifier": {
+												"value": {
+													"value": "@pipeline().parameters.P_custom_identifier",
+													"type": "Expression"
+												},
+												"type": "String"
+											},
+											"json_value": {
+												"value": {
+													"value": "@{string(activity('debug_sandboxactivityruns').output)}",
+													"type": "Expression"
+												},
+												"type": "String"
+											}
+										}
+									},
+									"linkedServiceName": {
+										"referenceName": "AzureSqlMI1",
+										"type": "LinkedServiceReference"
+									}
+								}
+							]
+						}
+					}
+				],
+				"policy": {
+					"elapsedTimeMetric": {}
+				},
+				"parameters": {
+					"P_runid": {
+						"type": "string"
+					},
+					"P_start_time": {
+						"type": "string",
+						"defaultValue": "2018-01-01"
+					},
+					"P_end_time": {
+						"type": "string",
+						"defaultValue": "2025-01-01"
+					},
+					"P_run_type": {
+						"type": "string",
+						"defaultValue": "trigger"
+					},
+					"P_custom_identifier": {
+						"type": "string",
+						"defaultValue": "Unknown"
+					},
+					"P_batch_id": {
+						"type": "string"
+					},
+					"P_adf_api_base_url": {
+						"type": "string"
+					},
+					"P_pipelineName": {
+						"type": "string"
+					}
+				},
+				"folder": {
+					"name": "Logging"
+				},
+				"annotations": [],
+				"lastPublishTime": "2024-04-10T12:09:20Z"
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/linkedServices/AzureSqlMI1')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/PL_Staging_RDBMS_Child')]",
+			"type": "Microsoft.DataFactory/factories/pipelines",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"activities": [
+					{
+						"name": "Set Copy Type",
+						"description": "Set Variable activity to set V_CopyType based on Set CopyType_Init activity output",
+						"type": "SetVariable",
+						"dependsOn": [
+							{
+								"activity": "Set CopyType_Init",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"variableName": "V_CopyType",
+							"value": {
+								"value": "@trim(string(variables('V_CopyType_Init')))",
+								"type": "Expression"
+							}
+						}
+					},
+					{
+						"name": "Get Max Date In Source",
+						"description": "Script acivity to get the max date value from Source",
+						"type": "Script",
+						"dependsOn": [
+							{
+								"activity": "Set Copy Type",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							},
+							{
+								"activity": "Update LastRefreshStatus To InProgress",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "7.00:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"linkedServiceName": {
+							"referenceName": "SqlServer1",
+							"type": "LinkedServiceReference"
+						},
+						"typeProperties": {
+							"scripts": [
+								{
+									"type": "Query",
+									"text": {
+										"value": "@{\n    if(  not(equals(pipeline().parameters.P_Entity.IncRefreshColumn,''))\n        ,concat('SELECT MAX(',pipeline().parameters.P_Entity.IncRefreshColumn,') AS MaxDate FROM [',pipeline().parameters.P_Entity.SrcTableSchema,'].[',pipeline().parameters.P_Entity.SrcTableName,']')\n        ,'SELECT NULL AS MaxDate'\n    )\n}\n\n;\nSelect count(*) as cnt from @{pipeline().parameters.P_Entity.SrcTableSchema}.@{pipeline().parameters.P_Entity.SrcTableName}\n\n;\n",
+										"type": "Expression"
+									}
+								}
+							]
+						}
+					},
+					{
+						"name": "Update ControlTable details",
+						"description": "Script activity to set LastRefreshDate, IncRefreshMaxDate and LastRefreshStatus values in RDBMSControlTable ",
+						"type": "Script",
+						"dependsOn": [
+							{
+								"activity": "CP_OnPrem_To_MISQL",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "7.00:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"linkedServiceName": {
+							"referenceName": "AzureSqlMI1",
+							"type": "LinkedServiceReference"
+						},
+						"typeProperties": {
+							"scripts": [
+								{
+									"type": "NonQuery",
+									"text": {
+										"value": "UPDATE [config].[RDBMSControlTable]\nSET LastRefreshDate= GETDATE()\n,LastRefreshStatus='Merge is Pending'\n,IncRefreshMaxDate = '@{activity('Get Max Date In Source').output.resultSets[0].rows[0].MaxDate}'\nWHERE ControlID = @{pipeline().parameters.P_Entity.ControlID}\n\nDelete from [Config].[TempRDBMSControlTable] WHERE ControlID = @{pipeline().parameters.P_Entity.ControlID} and SrcConnectionType = '@{pipeline().parameters.P_Entity.SrcConnectionType}'\n\n;\n\n\n;\nDelete from Config.RowCountValidation where BusinessArea = '@{pipeline().parameters.P_Entity.BusinessArea}' and SrcTableName =  '@{pipeline().parameters.P_Entity.SrcTableSchema}'+'_'+'@{pipeline().parameters.P_Entity.SrcTableName}'\n;\nInsert into Config.RowCountValidation(BusinessArea,SrcTableName,SrCRowCount,TgtTableName,CreatedDate)\nSelect '@{pipeline().parameters.P_Entity.BusinessArea}','@{pipeline().parameters.P_Entity.SrcTableSchema}'+'_'+'@{pipeline().parameters.P_Entity.SrcTableName}',@{activity('Get Max Date In Source').output.resultSets[1].rows[0].cnt},'raw'+'_'+'@{pipeline().parameters.P_Entity.TgtTableName}',Getdate()",
+										"type": "Expression"
+									}
+								}
+							]
+						}
+					},
+					{
+						"name": "Update LastRefreshStatus To InProgress",
+						"description": "Script activity to set LastRefreshStatus value in RDBMSControlTable",
+						"type": "Script",
+						"dependsOn": [],
+						"policy": {
+							"timeout": "7.00:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"linkedServiceName": {
+							"referenceName": "AzureSqlMI1",
+							"type": "LinkedServiceReference"
+						},
+						"typeProperties": {
+							"scripts": [
+								{
+									"type": "NonQuery",
+									"text": {
+										"value": "UPDATE [config].[RDBMSControlTable]\nSET LastRefreshStatus='InProgress'\nWHERE ControlID = @{pipeline().parameters.P_Entity.ControlID}\n",
+										"type": "Expression"
+									}
+								}
+							]
+						}
+					},
+					{
+						"name": "CP_OnPrem_To_MISQL",
+						"description": "Copy activity to copy tables from Onprem to Azure SQL MI",
+						"type": "Copy",
+						"dependsOn": [
+							{
+								"activity": "Get Max Date In Source",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "7.00:00:00",
+							"retry": 3,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"source": {
+								"type": "SqlServerSource",
+								"sqlReaderQuery": {
+									"value": "@{if(\n     equals(variables('V_CopyType'),'inc')\n     ,if(\n          equals(pipeline().parameters.P_Entity.Query,'')\n          ,replace(pipeline().parameters.P_Entity.CreatedQuery,'_lmdcclause_',concat(pipeline().parameters.P_Entity.IncRefreshColumn,' >= ''',pipeline().parameters.P_Entity.IncRefreshMaxDate,'''',' AND ',pipeline().parameters.P_Entity.IncRefreshColumn,' <= ','''',activity('Get Max Date In Source').output.resultSets[0].rows[0].MaxDate,''''))\n          ,replace(pipeline().parameters.P_Entity.Query,'_lmdcclause_',concat(pipeline().parameters.P_Entity.IncRefreshColumn,' >= ''',pipeline().parameters.P_Entity.IncRefreshMaxDate,'''',' AND ',pipeline().parameters.P_Entity.IncRefreshColumn,' <= ','''',activity('Get Max Date In Source').output.resultSets[0].rows[0].MaxDate,''''))\n     )\n     ,if(\n          equals(pipeline().parameters.P_Entity.Query,'')\n          ,replace(pipeline().parameters.P_Entity.CreatedQuery,'_lmdcclause_',' 1=1 ')\n          ,replace(pipeline().parameters.P_Entity.Query,'_lmdcclause_',' 1=1 ')\n     )\n)\n}",
+									"type": "Expression"
+								},
+								"queryTimeout": "02:00:00",
+								"partitionOption": "None"
+							},
+							"sink": {
+								"type": "SqlMISink",
+								"preCopyScript": {
+									"value": "if exists (Select 1 from sys.tables where name = '@{pipeline().parameters.P_Entity.TgtTableName}'  and  Schema_name(SChema_ID) = 'tmpstg' )\nTruncate table tmpstg.@{pipeline().parameters.P_Entity.TgtTableName}\n",
+									"type": "Expression"
+								},
+								"writeBehavior": "insert",
+								"sqlWriterUseTableLock": false,
+								"tableOption": "autoCreate"
+							},
+							"enableStaging": false,
+							"translator": {
+								"type": "TabularTranslator",
+								"typeConversion": true,
+								"typeConversionSettings": {
+									"allowDataTruncation": true,
+									"treatBooleanAsNumber": false
+								}
+							}
+						},
+						"inputs": [
+							{
+								"referenceName": "DS_OnPremSQL",
+								"type": "DatasetReference",
+								"parameters": {
+									"ServerName": {
+										"value": "@json(pipeline().parameters.P_Entity.SrcConnectionParam).ServerName",
+										"type": "Expression"
+									},
+									"DataBaseName": {
+										"value": "@json(pipeline().parameters.P_Entity.SrcConnectionParam).DatabaseName",
+										"type": "Expression"
+									},
+									"UserName": {
+										"value": "@json(pipeline().parameters.P_Entity.SrcConnectionParam).UserName",
+										"type": "Expression"
+									},
+									"AKVSKVSecretName": {
+										"value": "@json(pipeline().parameters.P_Entity.SrcConnectionParam).AKVSecretName",
+										"type": "Expression"
+									},
+									"SchemaName": {
+										"value": "@pipeline().parameters.P_Entity.SrcTableSchema",
+										"type": "Expression"
+									},
+									"TableName": {
+										"value": "@pipeline().parameters.P_Entity.SrcTableName",
+										"type": "Expression"
+									}
+								}
+							}
+						],
+						"outputs": [
+							{
+								"referenceName": "DS_AzureSqlMI",
+								"type": "DatasetReference",
+								"parameters": {
+									"SchemaName": "tmpstg",
+									"TableName": {
+										"value": "@pipeline().parameters.P_Entity.TgtTableName",
+										"type": "Expression"
+									},
+									"Servername": {
+										"value": "@json(pipeline().parameters.P_Entity.TgtConnectionParam).ServerName",
+										"type": "Expression"
+									},
+									"DatabaseName": {
+										"value": "@json(pipeline().parameters.P_Entity.TgtConnectionParam).DatabaseName",
+										"type": "Expression"
+									}
+								}
+							}
+						]
+					},
+					{
+						"name": "Set CopyType_Init",
+						"description": "Set Variable activity to set V_CopyType_Init to 'inc' or 'ftl' based on P_load_type parameter, PrimaryKeyList and IncRefreshColumn values",
+						"type": "SetVariable",
+						"dependsOn": [],
+						"policy": {
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"variableName": "V_CopyType_Init",
+							"value": {
+								"value": "@{if(\n    and(\n        and(\n             not(equals(pipeline().parameters.P_Entity.IncRefreshColumn,''))\n            ,not(equals(pipeline().parameters.P_Entity.PrimaryKeyList,''))\n        )\n    ,equals(toLower(pipeline().parameters.P_load_type),'inc')\n    )\n    ,'inc'\n    ,string('ftl')\n    )\n    \n    }\n\n",
+								"type": "Expression"
+							}
+						}
+					}
+				],
+				"policy": {
+					"elapsedTimeMetric": {}
+				},
+				"parameters": {
+					"P_Entity": {
+						"type": "object"
+					},
+					"P_load_type": {
+						"type": "string"
+					}
+				},
+				"variables": {
+					"V_CopyType": {
+						"type": "String"
+					},
+					"V_Runtime": {
+						"type": "Array"
+					},
+					"V_CopyType_Init": {
+						"type": "String"
+					}
+				},
+				"folder": {
+					"name": "Staging/RDBMS"
+				},
+				"annotations": [],
+				"lastPublishTime": "2024-04-10T12:09:21Z"
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/linkedServices/SqlServer1')]",
+				"[concat(variables('factoryId'), '/linkedServices/AzureSqlMI1')]",
+				"[concat(variables('factoryId'), '/datasets/DS_OnPremSQL')]",
+				"[concat(variables('factoryId'), '/datasets/DS_AzureSqlMI')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/PL_Staging_RDBMS_Master')]",
+			"type": "Microsoft.DataFactory/factories/pipelines",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"activities": [
+					{
+						"name": "LKP_Create_BatchID",
+						"description": "Lookup activity to create unique batchid for each pipeline run",
+						"type": "Lookup",
+						"dependsOn": [],
+						"policy": {
+							"timeout": "7.00:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"source": {
+								"type": "SqlMISource",
+								"sqlReaderStoredProcedureName": "[[Config].[usp_CheckBatchID]",
+								"storedProcedureParameters": {
+									"FilterClause": {
+										"type": "String",
+										"value": {
+											"value": "@pipeline().parameters.P_FilterClause",
+											"type": "Expression"
+										}
+									},
+									"PipelineName": {
+										"type": "String",
+										"value": "PL_Staging_RDBMS_Child"
+									},
+									"ReRun": {
+										"type": "Int32",
+										"value": {
+											"value": "@pipeline().parameters.P_ReRun",
+											"type": "Expression"
+										}
+									}
+								},
+								"partitionOption": "None"
+							},
+							"dataset": {
+								"referenceName": "DS_AzureSqlMI",
+								"type": "DatasetReference",
+								"parameters": {
+									"SchemaName": "dbo",
+									"TableName": "Test",
+									"Servername": "atr-sqlmi-dev.f6c1420b7b2a.database.windows.net",
+									"DatabaseName": "ATRConfig"
+								}
+							}
+						}
+					},
+					{
+						"name": "Set Filter Clause",
+						"description": "Set variable Activity to set filter clause from P_FilterClause parameter value",
+						"type": "SetVariable",
+						"dependsOn": [
+							{
+								"activity": "LKP_Create_BatchID",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"variableName": "V_FilterClause",
+							"value": {
+								"value": "@{if(\n    equals(pipeline().parameters.P_FilterClause,'')\n    ,' WHERE IsActive=1'\n    ,if(contains(pipeline().parameters.P_FilterClause,'WHERE')\n    ,replace(toLower(pipeline().parameters.P_FilterClause),'where',' where isactive=1 and ')\n    ,concat(' WHERE IsActive=1 AND ',pipeline().parameters.P_FilterClause)\n))}",
+								"type": "Expression"
+							}
+						}
+					},
+					{
+						"name": "Extract RDBMS Tables Details",
+						"description": "Srcipt activity to extract details from configuration table based on filter clause",
+						"type": "Script",
+						"dependsOn": [
+							{
+								"activity": "Set Filter Clause",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "7.00:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"linkedServiceName": {
+							"referenceName": "AzureSqlMI1",
+							"type": "LinkedServiceReference"
+						},
+						"typeProperties": {
+							"scripts": [
+								{
+									"type": "Query",
+									"text": {
+										"value": "if '@{activity('LKP_Create_BatchID').output.firstRow.Input}' = 'New'\nbegin\n@{concat('UPDATE [Config].[RDBMSControlTable] SET LastRefreshStatus = ''InProgress'', RefreshStartDate= GETUTCDATE() ',variables('V_FilterClause'))\n};\n\n@{concat('SELECT * FROM Config.vw_RDBMSControlTable',variables('V_FilterClause'))}\n;\n@{concat('TRUNCATE TABLE [Config].[TempRDBMSControlTable]')}\n;\n@{concat('INSERT INTO [Config].[TempRDBMSControlTable]\nSELECT * FROM Config.vw_RDBMSControlTable',variables('V_FilterClause')) }\nend\n\nelse\nbegin\nSELECT * FROM [Config].[TempRDBMSControlTable]\nend",
+										"type": "Expression"
+									}
+								}
+							]
+						}
+					},
+					{
+						"name": "ForEach_ExtractDataFromOnPrem",
+						"description": "ForEach Activity to run copy activity for each entity extracted from Extract RDBMS Tables Details activity",
+						"type": "ForEach",
+						"dependsOn": [
+							{
+								"activity": "Extract RDBMS Tables Details",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"userProperties": [],
+						"typeProperties": {
+							"items": {
+								"value": "@activity('Extract RDBMS Tables Details').output.resultSets[0].rows",
+								"type": "Expression"
+							},
+							"batchCount": 8,
+							"activities": [
+								{
+									"name": "Switch on Src Connection Type",
+									"type": "Switch",
+									"dependsOn": [],
+									"userProperties": [],
+									"typeProperties": {
+										"on": {
+											"value": "@toLower(item().SrcConnectionType)",
+											"type": "Expression"
+										},
+										"cases": [
+											{
+												"value": "onprem",
+												"activities": [
+													{
+														"name": "PL_Logging_Staging",
+														"type": "ExecutePipeline",
+														"dependsOn": [
+															{
+																"activity": "Execute staging for RDBMS Onprem tables",
+																"dependencyConditions": [
+																	"Completed"
+																]
+															}
+														],
+														"policy": {
+															"secureInput": false
+														},
+														"userProperties": [],
+														"typeProperties": {
+															"pipeline": {
+																"referenceName": "PL_Logging",
+																"type": "PipelineReference"
+															},
+															"waitOnCompletion": true,
+															"parameters": {
+																"P_runid": {
+																	"value": "@activity('Execute staging for RDBMS Onprem tables').output.pipelineRunId",
+																	"type": "Expression"
+																},
+																"P_run_type": {
+																	"value": "@pipeline().parameters.P_run_type",
+																	"type": "Expression"
+																},
+																"P_custom_identifier": {
+																	"value": "@item().SrcTableName",
+																	"type": "Expression"
+																},
+																"P_batch_id": {
+																	"value": "@activity('LKP_Create_BatchID').output.firstRow.BatchID",
+																	"type": "Expression"
+																},
+																"P_pipelineName": "PL_Staging_RDBMS_Child"
+															}
+														}
+													},
+													{
+														"name": "Execute staging for RDBMS Onprem tables",
+														"description": "Execute RDBMS Child Pipeline",
+														"type": "ExecutePipeline",
+														"dependsOn": [],
+														"policy": {
+															"secureInput": false
+														},
+														"userProperties": [],
+														"typeProperties": {
+															"pipeline": {
+																"referenceName": "PL_Staging_RDBMS_Child",
+																"type": "PipelineReference"
+															},
+															"waitOnCompletion": true,
+															"parameters": {
+																"P_Entity": {
+																	"value": "@item()",
+																	"type": "Expression"
+																},
+																"P_load_type": {
+																	"value": "@pipeline().parameters.P_load_type",
+																	"type": "Expression"
+																}
+															}
+														}
+													},
+													{
+														"name": "Fail Pipeline",
+														"type": "Fail",
+														"dependsOn": [
+															{
+																"activity": "Execute staging for RDBMS Onprem tables",
+																"dependencyConditions": [
+																	"Failed"
+																]
+															}
+														],
+														"userProperties": [],
+														"typeProperties": {
+															"message": "Failed Due to Inner Activity Failure",
+															"errorCode": "500"
+														}
+													}
+												]
+											}
+										]
+									}
+								}
+							]
+						}
+					},
+					{
+						"name": "ForEach_TablePerformMerge",
+						"description": "ForEach Activity to run merge stored proc for each entity extracted from Extract RDBMS Tables Details for Merge activity",
+						"type": "ForEach",
+						"dependsOn": [
+							{
+								"activity": "Extract RDBMS Tables Details for Merge",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"userProperties": [],
+						"typeProperties": {
+							"items": {
+								"value": "@activity('Extract RDBMS Tables Details for Merge').output.resultSets[0].rows",
+								"type": "Expression"
+							},
+							"batchCount": 8,
+							"activities": [
+								{
+									"name": "Execute Merge Stored Procedure",
+									"type": "SqlServerStoredProcedure",
+									"dependsOn": [],
+									"policy": {
+										"timeout": "0.12:00:00",
+										"retry": 0,
+										"retryIntervalInSeconds": 30,
+										"secureOutput": false,
+										"secureInput": false
+									},
+									"userProperties": [],
+									"typeProperties": {
+										"storedProcedureName": "Common.USP_MergeToMain_Master",
+										"storedProcedureParameters": {
+											"BusinessArea": {
+												"value": {
+													"value": "@item().BusinessArea",
+													"type": "Expression"
+												},
+												"type": "String"
+											},
+											"columnFilter": {
+												"value": "ValidationResult",
+												"type": "String"
+											},
+											"filterClause": {
+												"value": null,
+												"type": "String"
+											},
+											"Load_Type": {
+												"value": {
+													"value": "@if(and(and(not(equals(item().IncRefreshColumn,'')), not(equals(item().PrimaryKeyList,''))),equals(toLower(pipeline().parameters.P_load_type),'inc')),'inc','ftl')",
+													"type": "Expression"
+												},
+												"type": "String"
+											},
+											"primary_key_list": {
+												"value": {
+													"value": "@item().PrimaryKeyList",
+													"type": "Expression"
+												},
+												"type": "String"
+											},
+											"SourceControlTable": {
+												"value": {
+													"value": "RDBMSControlTable",
+													"type": "Expression"
+												},
+												"type": "String"
+											},
+											"SrcTableName": {
+												"value": {
+													"value": "@item().TgtTableName",
+													"type": "Expression"
+												},
+												"type": "String"
+											},
+											"SrcTableSchema": {
+												"value": {
+													"value": "tmpstg",
+													"type": "Expression"
+												},
+												"type": "String"
+											},
+											"TgtTableName": {
+												"value": {
+													"value": "@item().TgtTableName",
+													"type": "Expression"
+												},
+												"type": "String"
+											},
+											"TgtTableSchema": {
+												"value": {
+													"value": "raw",
+													"type": "Expression"
+												},
+												"type": "String"
+											},
+											"BatchID": {
+												"value": {
+													"value": "@activity('LKP_Create_BatchID').output.firstRow.BatchID",
+													"type": "Expression"
+												},
+												"type": "Int16"
+											}
+										}
+									},
+									"linkedServiceName": {
+										"referenceName": "AzureSqlMI1",
+										"type": "LinkedServiceReference"
+									}
+								}
+							]
+						}
+					},
+					{
+						"name": "Execute PL_Validation",
+						"description": "Execute pipeline activty to execute validation all tables in the result set of Extract RDBMS Tables Details for Merge activity",
+						"type": "ExecutePipeline",
+						"dependsOn": [
+							{
+								"activity": "ForEach_TablePerformMerge",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"pipeline": {
+								"referenceName": "PL_Validation",
+								"type": "PipelineReference"
+							},
+							"waitOnCompletion": true,
+							"parameters": {
+								"P_filter_Clause": {
+									"value": "@concat('IsActive=1 and Tag = ''RDBMS''',' And SourceControlID in (',activity('Extract RDBMS Tables Details for Merge').output.resultSets[1].rows[0].ControlID_List,') ')",
+									"type": "Expression"
+								},
+								"P_run_type": {
+									"value": "@pipeline().parameters.P_run_type",
+									"type": "Expression"
+								},
+								"P_load_type": {
+									"value": "@pipeline().parameters.P_load_type",
+									"type": "Expression"
+								},
+								"P_BatchID": {
+									"value": "@activity('LKP_Create_BatchID').output.firstRow.BatchID",
+									"type": "Expression"
+								}
+							}
+						}
+					},
+					{
+						"name": "Extract RDBMS Tables Details for Merge",
+						"description": "Srcipt activity to extract details from configuration table where LastRefreshStatus is 'Merge is Pending'",
+						"type": "Script",
+						"dependsOn": [
+							{
+								"activity": "ForEach_ExtractDataFromOnPrem",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "7.00:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"linkedServiceName": {
+							"referenceName": "AzureSqlMI1",
+							"type": "LinkedServiceReference"
+						},
+						"typeProperties": {
+							"scripts": [
+								{
+									"type": "Query",
+									"text": {
+										"value": "SELECT * FROM Config.vw_RDBMSControlTable \nWHERE LastRefreshStatus = 'Merge is Pending';\n\nSELECT string_agg(controlid,',') as ControlID_List FROM Config.vw_RDBMSControlTable \nWHERE LastRefreshStatus = 'Merge is Pending'\n",
+										"type": "Expression"
+									}
+								}
+							]
+						}
+					}
+				],
+				"policy": {
+					"elapsedTimeMetric": {}
+				},
+				"parameters": {
+					"P_FilterClause": {
+						"type": "string",
+						"defaultValue": "IsActive=1"
+					},
+					"P_run_type": {
+						"type": "string",
+						"defaultValue": "debug"
+					},
+					"P_load_type": {
+						"type": "string",
+						"defaultValue": "inc"
+					},
+					"P_ReRun": {
+						"type": "int",
+						"defaultValue": 0
+					}
+				},
+				"variables": {
+					"V_FilterClause": {
+						"type": "String"
+					},
+					"V_StartTime": {
+						"type": "String"
+					},
+					"V_EndTime": {
+						"type": "String"
+					}
+				},
+				"folder": {
+					"name": "Staging/RDBMS"
+				},
+				"annotations": [],
+				"lastPublishTime": "2024-04-11T12:24:27Z"
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/datasets/DS_AzureSqlMI')]",
+				"[concat(variables('factoryId'), '/linkedServices/AzureSqlMI1')]",
+				"[concat(variables('factoryId'), '/pipelines/PL_Validation')]",
+				"[concat(variables('factoryId'), '/pipelines/PL_Logging')]",
+				"[concat(variables('factoryId'), '/pipelines/PL_Staging_RDBMS_Child')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/PL_Validation')]",
+			"type": "Microsoft.DataFactory/factories/pipelines",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"description": "Pipeline to validate data between raw and std layer",
+				"activities": [
+					{
+						"name": "LKP_Create_BatchID",
+						"description": "Lookup activity to create unique batchid for each pipeline run",
+						"type": "Lookup",
+						"dependsOn": [],
+						"policy": {
+							"timeout": "7.00:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"source": {
+								"type": "SqlMISource",
+								"sqlReaderQuery": {
+									"value": "DECLARE @current_datetime datetime = getdate()\nINSERT INTO [common].[BatchDetails] (CreatedDateTime,Comments)\nSELECT @current_datetime,@{concat('''','Executed Validation Process; With Filters: ',replace(pipeline().parameters.P_filter_clause,'''',''''''),'''')}\n\nif isnull('@{pipeline().parameters.P_BatchID}','') = ''\nBegin\nSELECT BatchID \nFROM [common].[BatchDetails]\nwhere CreatedDateTime = @current_datetime\nEnd\nElse \nSelect '@{pipeline().parameters.P_BatchID}'  as BatchID",
+									"type": "Expression"
+								},
+								"partitionOption": "None"
+							},
+							"dataset": {
+								"referenceName": "DS_AzureSqlMI",
+								"type": "DatasetReference",
+								"parameters": {
+									"SchemaName": "dbo",
+									"TableName": "Test",
+									"Servername": "atr-sqlmi-dev.f6c1420b7b2a.database.windows.net",
+									"DatabaseName": "ATRConfig"
+								}
+							},
+							"firstRowOnly": true
+						}
+					},
+					{
+						"name": "Set Filter Clause",
+						"description": "Set variable Activity to set filter clause from P_filter_Clause parameter value",
+						"type": "SetVariable",
+						"dependsOn": [
+							{
+								"activity": "LKP_Create_BatchID",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"variableName": "V_FilterClause",
+							"value": {
+								"value": "@{if(\n    equals(pipeline().parameters.P_filter_clause,'')\n    ,' WHERE IsActive=1'\n    ,if(contains(pipeline().parameters.P_filter_clause,'WHERE')\n    ,replace(toLower(pipeline().parameters.P_filter_clause),'where',' where isactive=1 and ')\n    ,concat(' WHERE IsActive=1 AND ',pipeline().parameters.P_filter_clause)\n))}",
+								"type": "Expression"
+							}
+						}
+					},
+					{
+						"name": "Extract Validation Details",
+						"description": "Srcipt activity to extract details from configuration table based on filter clause",
+						"type": "Script",
+						"dependsOn": [
+							{
+								"activity": "Set Filter Clause",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "7.00:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"linkedServiceName": {
+							"referenceName": "AzureSqlMI1",
+							"type": "LinkedServiceReference"
+						},
+						"typeProperties": {
+							"scripts": [
+								{
+									"type": "Query",
+									"text": {
+										"value": "@{concat('UPDATE [Config].[ValidationControlTable] SET RunStatus = NULL',variables('V_FilterClause'))\n}\n;SELECT *\nFROM [Config].[ValidationControlTable] @{variables('V_FilterClause')}",
+										"type": "Expression"
+									}
+								}
+							]
+						}
+					},
+					{
+						"name": "ForEachRecord_RunValidationQuery",
+						"description": "ForEach Activity to run Validation for each  entity extarcted from Extract Validation Details activity",
+						"type": "ForEach",
+						"dependsOn": [
+							{
+								"activity": "Extract Validation Details",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"userProperties": [],
+						"typeProperties": {
+							"items": {
+								"value": "@activity('Extract Validation Details').output.resultSets[0].rows",
+								"type": "Expression"
+							},
+							"activities": [
+								{
+									"name": "Execute Validation Stored Procedure",
+									"description": "Stored Procedure activity to validate data from raw layer",
+									"type": "SqlServerStoredProcedure",
+									"dependsOn": [],
+									"policy": {
+										"timeout": "0.12:00:00",
+										"retry": 0,
+										"retryIntervalInSeconds": 30,
+										"secureOutput": false,
+										"secureInput": false
+									},
+									"userProperties": [],
+									"typeProperties": {
+										"storedProcedureName": "[[common].[usp_ValidationChecks]",
+										"storedProcedureParameters": {
+											"BatchID": {
+												"value": {
+													"value": "@activity('LKP_Create_BatchID').output.firstRow.BatchID",
+													"type": "Expression"
+												},
+												"type": "String"
+											},
+											"ControlID": {
+												"value": {
+													"value": "@item().ControlID",
+													"type": "Expression"
+												},
+												"type": "Int32"
+											},
+											"LoadType": {
+												"value": {
+													"value": "@pipeline().parameters.P_load_type",
+													"type": "Expression"
+												},
+												"type": "String"
+											}
+										}
+									},
+									"linkedServiceName": {
+										"referenceName": "AzureSqlMI1",
+										"type": "LinkedServiceReference"
+									}
+								}
+							]
+						}
+					}
+				],
+				"policy": {
+					"elapsedTimeMetric": {}
+				},
+				"parameters": {
+					"P_filter_Clause": {
+						"type": "string",
+						"defaultValue": "IsActive=1"
+					},
+					"P_run_type": {
+						"type": "string",
+						"defaultValue": "debug"
+					},
+					"P_load_type": {
+						"type": "string",
+						"defaultValue": "ftl"
+					},
+					"P_BatchID": {
+						"type": "string"
+					}
+				},
+				"variables": {
+					"V_FilterClause": {
+						"type": "String"
+					}
+				},
+				"folder": {
+					"name": "Validation"
+				},
+				"annotations": [],
+				"lastPublishTime": "2024-04-10T12:09:21Z"
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/datasets/DS_AzureSqlMI')]",
+				"[concat(variables('factoryId'), '/linkedServices/AzureSqlMI1')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/pipeline1')]",
+			"type": "Microsoft.DataFactory/factories/pipelines",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"activities": [
+					{
+						"name": "Set variable1",
+						"type": "SetVariable",
+						"dependsOn": [],
+						"policy": {
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"variableName": "test",
+							"value": "select 1 as test"
+						}
+					}
+				],
+				"policy": {
+					"elapsedTimeMetric": {}
+				},
+				"variables": {
+					"test": {
+						"type": "String"
+					}
+				},
+				"annotations": []
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/pipeline2')]",
+			"type": "Microsoft.DataFactory/factories/pipelines",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"activities": [
+					{
+						"name": "Set variable1",
+						"type": "SetVariable",
+						"dependsOn": [],
+						"policy": {
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"variableName": "sample",
+							"value": {
+								"value": "select 1 as one",
+								"type": "Expression"
+							}
+						}
+					}
+				],
+				"policy": {
+					"elapsedTimeMetric": {}
+				},
+				"variables": {
+					"sample": {
+						"type": "String"
+					}
+				},
+				"annotations": []
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/DS_AzureSqlMI')]",
+			"type": "Microsoft.DataFactory/factories/datasets",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"linkedServiceName": {
+					"referenceName": "AzureSqlMI1",
+					"type": "LinkedServiceReference"
+				},
+				"parameters": {
+					"SchemaName": {
+						"type": "string"
+					},
+					"TableName": {
+						"type": "string"
+					},
+					"Servername": {
+						"type": "string"
+					},
+					"DatabaseName": {
+						"type": "string"
+					}
+				},
+				"annotations": [],
+				"type": "AzureSqlMITable",
+				"schema": [],
+				"typeProperties": {
+					"schema": {
+						"value": "@dataset().SchemaName",
+						"type": "Expression"
+					},
+					"table": {
+						"value": "@dataset().TableName",
+						"type": "Expression"
+					}
+				}
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/linkedServices/AzureSqlMI1')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/DS_OnPremSQL')]",
+			"type": "Microsoft.DataFactory/factories/datasets",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"linkedServiceName": {
+					"referenceName": "SqlServer1",
+					"type": "LinkedServiceReference"
+				},
+				"parameters": {
+					"ServerName": {
+						"type": "string"
+					},
+					"DataBaseName": {
+						"type": "string"
+					},
+					"UserName": {
+						"type": "string"
+					},
+					"AKVSKVSecretName": {
+						"type": "string"
+					},
+					"SchemaName": {
+						"type": "string"
+					},
+					"TableName": {
+						"type": "string"
+					}
+				},
+				"annotations": [],
+				"type": "SqlServerTable",
+				"schema": [],
+				"typeProperties": {
+					"schema": {
+						"value": "@dataset().SchemaName",
+						"type": "Expression"
+					},
+					"table": {
+						"value": "@dataset().TableName",
+						"type": "Expression"
+					}
+				}
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/linkedServices/SqlServer1')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/AzureSqlDatabase1')]",
+			"type": "Microsoft.DataFactory/factories/linkedServices",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"annotations": [],
+				"type": "AzureSqlDatabase",
+				"typeProperties": {
+					"connectionString": "[parameters('AzureSqlDatabase1_connectionString')]"
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/AzureSqlMI1')]",
+			"type": "Microsoft.DataFactory/factories/linkedServices",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"annotations": [],
+				"type": "AzureSqlMI",
+				"typeProperties": {
+					"connectionString": "[parameters('AzureSqlMI1_connectionString')]"
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/SqlServer1')]",
+			"type": "Microsoft.DataFactory/factories/linkedServices",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"annotations": [],
+				"type": "SqlServer",
+				"typeProperties": {
+					"connectionString": "[parameters('SqlServer1_connectionString')]"
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/integrationRuntime1')]",
+			"type": "Microsoft.DataFactory/factories/integrationRuntimes",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"type": "SelfHosted",
+				"typeProperties": {}
+			},
+			"dependsOn": []
+		}
+	]
+}

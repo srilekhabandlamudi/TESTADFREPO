@@ -1,0 +1,10 @@
+{
+	"SubscriptionID": {
+		"type": "string",
+		"value": "abc"
+	},
+	"ResourceGroupName": {
+		"type": "string",
+		"value": "abc"
+	}
+}
