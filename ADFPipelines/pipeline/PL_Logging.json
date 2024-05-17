@@ -1,0 +1,218 @@
+{
+	"name": "PL_Logging",
+	"properties": {
+		"description": "Pipeline for capturing logs of each activity during pipeline run",
+		"activities": [
+			{
+				"name": "If Debug",
+				"description": "If activity to identify pipeline runtype",
+				"type": "IfCondition",
+				"dependsOn": [],
+				"userProperties": [],
+				"typeProperties": {
+					"expression": {
+						"value": "@equals(toLower(pipeline().parameters.P_run_type),'debug')",
+						"type": "Expression"
+					},
+					"ifFalseActivities": [
+						{
+							"name": "trigger_activityruns",
+							"description": "Web Activity to call trigger RestAPI of ADF",
+							"type": "WebActivity",
+							"dependsOn": [],
+							"policy": {
+								"timeout": "7.00:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"method": "POST",
+								"url": {
+									"value": "@{concat('https://management.azure.com/subscriptions/',pipeline().globalParameters.SubscriptionID,'/resourceGroups/',pipeline().globalParameters.ResourceGroupName,'/providers/Microsoft.DataFactory/factories/',pipeline().DataFactory)}/pipelineruns/@{pipeline().parameters.P_runid}/queryActivityruns?api-version=2018-06-01",
+									"type": "Expression"
+								},
+								"body": {
+									"value": "{\n  \"lastUpdatedAfter\": \"@{formatDateTime(pipeline().parameters.P_start_time)}\",\n  \"lastUpdatedBefore\": \"@{formatDateTime(pipeline().parameters.P_end_time)}\"\n}",
+									"type": "Expression"
+								},
+								"authentication": {
+									"type": "MSI",
+									"resource": "https://management.azure.com"
+								}
+							}
+						},
+						{
+							"name": "sp_pipeline logger_Trigger",
+							"description": "Stored Procedure Activity to insert logs data into common.ADFLogs",
+							"type": "SqlServerStoredProcedure",
+							"dependsOn": [
+								{
+									"activity": "trigger_activityruns",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "7.00:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"storedProcedureName": "[common].[usp_ADFPipelineLogger]",
+								"storedProcedureParameters": {
+									"batch_id": {
+										"value": {
+											"value": "@pipeline().parameters.P_batch_id",
+											"type": "Expression"
+										},
+										"type": "Int64"
+									},
+									"custom_identifier": {
+										"value": {
+											"value": "@pipeline().parameters.P_custom_identifier",
+											"type": "Expression"
+										},
+										"type": "String"
+									},
+									"json_value": {
+										"value": {
+											"value": "@{string(activity('trigger_activityruns').output)}",
+											"type": "Expression"
+										},
+										"type": "String"
+									}
+								}
+							},
+							"linkedServiceName": {
+								"referenceName": "AzureSqlMI1",
+								"type": "LinkedServiceReference"
+							}
+						}
+					],
+					"ifTrueActivities": [
+						{
+							"name": "debug_sandboxactivityruns",
+							"description": "Web Activity to call debug RestAPI of ADF",
+							"type": "WebActivity",
+							"dependsOn": [],
+							"policy": {
+								"timeout": "7.00:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"method": "GET",
+								"httpRequestTimeout": "",
+								"url": {
+									"value": "@{concat('https://management.azure.com/subscriptions/',pipeline().globalParameters.SubscriptionID,'/resourceGroups/',pipeline().globalParameters.ResourceGroupName,'/providers/Microsoft.DataFactory/factories/',pipeline().DataFactory)}/sandboxpipelineruns/@{pipeline().parameters.P_runid}/sandboxActivityRuns?startTime=@{formatDateTime(pipeline().parameters.P_start_time)}&endTime=@{formatDateTime(pipeline().parameters.P_end_time)}&api-version=2017-09-01-preview",
+									"type": "Expression"
+								},
+								"authentication": {
+									"type": "MSI",
+									"resource": "https://management.azure.com"
+								}
+							}
+						},
+						{
+							"name": "sp_pipeline logger",
+							"description": "Stored Procedure Activity to insert logs data into common.ADFLogs",
+							"type": "SqlServerStoredProcedure",
+							"dependsOn": [
+								{
+									"activity": "debug_sandboxactivityruns",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "7.00:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"storedProcedureName": "[common].[usp_ADFPipelineLogger]",
+								"storedProcedureParameters": {
+									"batch_id": {
+										"value": {
+											"value": "@pipeline().parameters.P_batch_id",
+											"type": "Expression"
+										},
+										"type": "Int64"
+									},
+									"custom_identifier": {
+										"value": {
+											"value": "@pipeline().parameters.P_custom_identifier",
+											"type": "Expression"
+										},
+										"type": "String"
+									},
+									"json_value": {
+										"value": {
+											"value": "@{string(activity('debug_sandboxactivityruns').output)}",
+											"type": "Expression"
+										},
+										"type": "String"
+									}
+								}
+							},
+							"linkedServiceName": {
+								"referenceName": "AzureSqlMI1",
+								"type": "LinkedServiceReference"
+							}
+						}
+					]
+				}
+			}
+		],
+		"parameters": {
+			"P_runid": {
+				"type": "string"
+			},
+			"P_start_time": {
+				"type": "string",
+				"defaultValue": "2018-01-01"
+			},
+			"P_end_time": {
+				"type": "string",
+				"defaultValue": "2025-01-01"
+			},
+			"P_run_type": {
+				"type": "string",
+				"defaultValue": "trigger"
+			},
+			"P_custom_identifier": {
+				"type": "string",
+				"defaultValue": "Unknown"
+			},
+			"P_batch_id": {
+				"type": "string"
+			},
+			"P_adf_api_base_url": {
+				"type": "string"
+			},
+			"P_pipelineName": {
+				"type": "string"
+			}
+		},
+		"folder": {
+			"name": "Logging"
+		},
+		"annotations": [],
+		"lastPublishTime": "2024-04-10T12:09:20Z"
+	},
+	"type": "Microsoft.DataFactory/factories/pipelines"
+}

@@ -1,0 +1,198 @@
+{
+	"name": "PL_Validation",
+	"properties": {
+		"description": "Pipeline to validate data between raw and std layer",
+		"activities": [
+			{
+				"name": "LKP_Create_BatchID",
+				"description": "Lookup activity to create unique batchid for each pipeline run",
+				"type": "Lookup",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "SqlMISource",
+						"sqlReaderQuery": {
+							"value": "DECLARE @current_datetime datetime = getdate()\nINSERT INTO [common].[BatchDetails] (CreatedDateTime,Comments)\nSELECT @current_datetime,@{concat('''','Executed Validation Process; With Filters: ',replace(pipeline().parameters.P_filter_clause,'''',''''''),'''')}\n\nif isnull('@{pipeline().parameters.P_BatchID}','') = ''\nBegin\nSELECT BatchID \nFROM [common].[BatchDetails]\nwhere CreatedDateTime = @current_datetime\nEnd\nElse \nSelect '@{pipeline().parameters.P_BatchID}'  as BatchID",
+							"type": "Expression"
+						},
+						"partitionOption": "None"
+					},
+					"dataset": {
+						"referenceName": "DS_AzureSqlMI",
+						"type": "DatasetReference",
+						"parameters": {
+							"SchemaName": "dbo",
+							"TableName": "Test",
+							"Servername": "atr-sqlmi-dev.f6c1420b7b2a.database.windows.net",
+							"DatabaseName": "ATRConfig"
+						}
+					},
+					"firstRowOnly": true
+				}
+			},
+			{
+				"name": "Set Filter Clause",
+				"description": "Set variable Activity to set filter clause from P_filter_Clause parameter value",
+				"type": "SetVariable",
+				"dependsOn": [
+					{
+						"activity": "LKP_Create_BatchID",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"variableName": "V_FilterClause",
+					"value": {
+						"value": "@{if(\n    equals(pipeline().parameters.P_filter_clause,'')\n    ,' WHERE IsActive=1'\n    ,if(contains(pipeline().parameters.P_filter_clause,'WHERE')\n    ,replace(toLower(pipeline().parameters.P_filter_clause),'where',' where isactive=1 and ')\n    ,concat(' WHERE IsActive=1 AND ',pipeline().parameters.P_filter_clause)\n))}",
+						"type": "Expression"
+					}
+				}
+			},
+			{
+				"name": "Extract Validation Details",
+				"description": "Srcipt activity to extract details from configuration table based on filter clause",
+				"type": "Script",
+				"dependsOn": [
+					{
+						"activity": "Set Filter Clause",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"linkedServiceName": {
+					"referenceName": "AzureSqlMI1",
+					"type": "LinkedServiceReference"
+				},
+				"typeProperties": {
+					"scripts": [
+						{
+							"type": "Query",
+							"text": {
+								"value": "@{concat('UPDATE [Config].[ValidationControlTable] SET RunStatus = NULL',variables('V_FilterClause'))\n}\n;SELECT *\nFROM [Config].[ValidationControlTable] @{variables('V_FilterClause')}",
+								"type": "Expression"
+							}
+						}
+					]
+				}
+			},
+			{
+				"name": "ForEachRecord_RunValidationQuery",
+				"description": "ForEach Activity to run Validation for each  entity extarcted from Extract Validation Details activity",
+				"type": "ForEach",
+				"dependsOn": [
+					{
+						"activity": "Extract Validation Details",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"items": {
+						"value": "@activity('Extract Validation Details').output.resultSets[0].rows",
+						"type": "Expression"
+					},
+					"activities": [
+						{
+							"name": "Execute Validation Stored Procedure",
+							"description": "Stored Procedure activity to validate data from raw layer",
+							"type": "SqlServerStoredProcedure",
+							"dependsOn": [],
+							"policy": {
+								"timeout": "0.12:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"storedProcedureName": "[common].[usp_ValidationChecks]",
+								"storedProcedureParameters": {
+									"BatchID": {
+										"value": {
+											"value": "@activity('LKP_Create_BatchID').output.firstRow.BatchID",
+											"type": "Expression"
+										},
+										"type": "String"
+									},
+									"ControlID": {
+										"value": {
+											"value": "@item().ControlID",
+											"type": "Expression"
+										},
+										"type": "Int32"
+									},
+									"LoadType": {
+										"value": {
+											"value": "@pipeline().parameters.P_load_type",
+											"type": "Expression"
+										},
+										"type": "String"
+									}
+								}
+							},
+							"linkedServiceName": {
+								"referenceName": "AzureSqlMI1",
+								"type": "LinkedServiceReference"
+							}
+						}
+					]
+				}
+			}
+		],
+		"parameters": {
+			"P_filter_Clause": {
+				"type": "string",
+				"defaultValue": "IsActive=1"
+			},
+			"P_run_type": {
+				"type": "string",
+				"defaultValue": "debug"
+			},
+			"P_load_type": {
+				"type": "string",
+				"defaultValue": "ftl"
+			},
+			"P_BatchID": {
+				"type": "string"
+			}
+		},
+		"variables": {
+			"V_FilterClause": {
+				"type": "String"
+			}
+		},
+		"folder": {
+			"name": "Validation"
+		},
+		"annotations": [],
+		"lastPublishTime": "2024-04-10T12:09:21Z"
+	},
+	"type": "Microsoft.DataFactory/factories/pipelines"
+}

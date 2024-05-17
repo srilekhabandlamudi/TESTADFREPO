@@ -1,0 +1,476 @@
+{
+	"name": "PL_Staging_RDBMS_Master",
+	"properties": {
+		"activities": [
+			{
+				"name": "LKP_Create_BatchID",
+				"description": "Lookup activity to create unique batchid for each pipeline run",
+				"type": "Lookup",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "SqlMISource",
+						"sqlReaderStoredProcedureName": "[Config].[usp_CheckBatchID]",
+						"storedProcedureParameters": {
+							"FilterClause": {
+								"type": "String",
+								"value": {
+									"value": "@pipeline().parameters.P_FilterClause",
+									"type": "Expression"
+								}
+							},
+							"PipelineName": {
+								"type": "String",
+								"value": "PL_Staging_RDBMS_Child"
+							},
+							"ReRun": {
+								"type": "Int32",
+								"value": {
+									"value": "@pipeline().parameters.P_ReRun",
+									"type": "Expression"
+								}
+							}
+						},
+						"partitionOption": "None"
+					},
+					"dataset": {
+						"referenceName": "DS_AzureSqlMI",
+						"type": "DatasetReference",
+						"parameters": {
+							"SchemaName": "dbo",
+							"TableName": "Test",
+							"Servername": "atr-sqlmi-dev.f6c1420b7b2a.database.windows.net",
+							"DatabaseName": "ATRConfig"
+						}
+					}
+				}
+			},
+			{
+				"name": "Set Filter Clause",
+				"description": "Set variable Activity to set filter clause from P_FilterClause parameter value",
+				"type": "SetVariable",
+				"dependsOn": [
+					{
+						"activity": "LKP_Create_BatchID",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"variableName": "V_FilterClause",
+					"value": {
+						"value": "@{if(\n    equals(pipeline().parameters.P_FilterClause,'')\n    ,' WHERE IsActive=1'\n    ,if(contains(pipeline().parameters.P_FilterClause,'WHERE')\n    ,replace(toLower(pipeline().parameters.P_FilterClause),'where',' where isactive=1 and ')\n    ,concat(' WHERE IsActive=1 AND ',pipeline().parameters.P_FilterClause)\n))}",
+						"type": "Expression"
+					}
+				}
+			},
+			{
+				"name": "Extract RDBMS Tables Details",
+				"description": "Srcipt activity to extract details from configuration table based on filter clause",
+				"type": "Script",
+				"dependsOn": [
+					{
+						"activity": "Set Filter Clause",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"linkedServiceName": {
+					"referenceName": "AzureSqlMI1",
+					"type": "LinkedServiceReference"
+				},
+				"typeProperties": {
+					"scripts": [
+						{
+							"type": "Query",
+							"text": {
+								"value": "if '@{activity('LKP_Create_BatchID').output.firstRow.Input}' = 'New'\nbegin\n@{concat('UPDATE [Config].[RDBMSControlTable] SET LastRefreshStatus = ''InProgress'', RefreshStartDate= GETUTCDATE() ',variables('V_FilterClause'))\n};\n\n@{concat('SELECT * FROM Config.vw_RDBMSControlTable',variables('V_FilterClause'))}\n;\n@{concat('TRUNCATE TABLE [Config].[TempRDBMSControlTable]')}\n;\n@{concat('INSERT INTO [Config].[TempRDBMSControlTable]\nSELECT * FROM Config.vw_RDBMSControlTable',variables('V_FilterClause')) }\nend\n\nelse\nbegin\nSELECT * FROM [Config].[TempRDBMSControlTable]\nend",
+								"type": "Expression"
+							}
+						}
+					]
+				}
+			},
+			{
+				"name": "ForEach_ExtractDataFromOnPrem",
+				"description": "ForEach Activity to run copy activity for each entity extracted from Extract RDBMS Tables Details activity",
+				"type": "ForEach",
+				"dependsOn": [
+					{
+						"activity": "Extract RDBMS Tables Details",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"items": {
+						"value": "@activity('Extract RDBMS Tables Details').output.resultSets[0].rows",
+						"type": "Expression"
+					},
+					"batchCount": 8,
+					"activities": [
+						{
+							"name": "Switch on Src Connection Type",
+							"type": "Switch",
+							"dependsOn": [],
+							"userProperties": [],
+							"typeProperties": {
+								"on": {
+									"value": "@toLower(item().SrcConnectionType)",
+									"type": "Expression"
+								},
+								"cases": [
+									{
+										"value": "onprem",
+										"activities": [
+											{
+												"name": "PL_Logging_Staging",
+												"type": "ExecutePipeline",
+												"dependsOn": [
+													{
+														"activity": "Execute staging for RDBMS Onprem tables",
+														"dependencyConditions": [
+															"Completed"
+														]
+													}
+												],
+												"policy": {
+													"secureInput": false
+												},
+												"userProperties": [],
+												"typeProperties": {
+													"pipeline": {
+														"referenceName": "PL_Logging",
+														"type": "PipelineReference"
+													},
+													"waitOnCompletion": true,
+													"parameters": {
+														"P_runid": {
+															"value": "@activity('Execute staging for RDBMS Onprem tables').output.pipelineRunId",
+															"type": "Expression"
+														},
+														"P_run_type": {
+															"value": "@pipeline().parameters.P_run_type",
+															"type": "Expression"
+														},
+														"P_custom_identifier": {
+															"value": "@item().SrcTableName",
+															"type": "Expression"
+														},
+														"P_batch_id": {
+															"value": "@activity('LKP_Create_BatchID').output.firstRow.BatchID",
+															"type": "Expression"
+														},
+														"P_pipelineName": "PL_Staging_RDBMS_Child"
+													}
+												}
+											},
+											{
+												"name": "Execute staging for RDBMS Onprem tables",
+												"description": "Execute RDBMS Child Pipeline",
+												"type": "ExecutePipeline",
+												"dependsOn": [],
+												"policy": {
+													"secureInput": false
+												},
+												"userProperties": [],
+												"typeProperties": {
+													"pipeline": {
+														"referenceName": "PL_Staging_RDBMS_Child",
+														"type": "PipelineReference"
+													},
+													"waitOnCompletion": true,
+													"parameters": {
+														"P_Entity": {
+															"value": "@item()",
+															"type": "Expression"
+														},
+														"P_load_type": {
+															"value": "@pipeline().parameters.P_load_type",
+															"type": "Expression"
+														}
+													}
+												}
+											},
+											{
+												"name": "Fail Pipeline",
+												"type": "Fail",
+												"dependsOn": [
+													{
+														"activity": "Execute staging for RDBMS Onprem tables",
+														"dependencyConditions": [
+															"Failed"
+														]
+													}
+												],
+												"userProperties": [],
+												"typeProperties": {
+													"message": "Failed Due to Inner Activity Failure",
+													"errorCode": "500"
+												}
+											}
+										]
+									}
+								]
+							}
+						}
+					]
+				}
+			},
+			{
+				"name": "ForEach_TablePerformMerge",
+				"description": "ForEach Activity to run merge stored proc for each entity extracted from Extract RDBMS Tables Details for Merge activity",
+				"type": "ForEach",
+				"dependsOn": [
+					{
+						"activity": "Extract RDBMS Tables Details for Merge",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"items": {
+						"value": "@activity('Extract RDBMS Tables Details for Merge').output.resultSets[0].rows",
+						"type": "Expression"
+					},
+					"batchCount": 8,
+					"activities": [
+						{
+							"name": "Execute Merge Stored Procedure",
+							"type": "SqlServerStoredProcedure",
+							"dependsOn": [],
+							"policy": {
+								"timeout": "0.12:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"storedProcedureName": "Common.USP_MergeToMain_Master",
+								"storedProcedureParameters": {
+									"BusinessArea": {
+										"value": {
+											"value": "@item().BusinessArea",
+											"type": "Expression"
+										},
+										"type": "String"
+									},
+									"columnFilter": {
+										"value": "ValidationResult",
+										"type": "String"
+									},
+									"filterClause": {
+										"value": null,
+										"type": "String"
+									},
+									"Load_Type": {
+										"value": {
+											"value": "@if(and(and(not(equals(item().IncRefreshColumn,'')), not(equals(item().PrimaryKeyList,''))),equals(toLower(pipeline().parameters.P_load_type),'inc')),'inc','ftl')",
+											"type": "Expression"
+										},
+										"type": "String"
+									},
+									"primary_key_list": {
+										"value": {
+											"value": "@item().PrimaryKeyList",
+											"type": "Expression"
+										},
+										"type": "String"
+									},
+									"SourceControlTable": {
+										"value": {
+											"value": "RDBMSControlTable",
+											"type": "Expression"
+										},
+										"type": "String"
+									},
+									"SrcTableName": {
+										"value": {
+											"value": "@item().TgtTableName",
+											"type": "Expression"
+										},
+										"type": "String"
+									},
+									"SrcTableSchema": {
+										"value": {
+											"value": "tmpstg",
+											"type": "Expression"
+										},
+										"type": "String"
+									},
+									"TgtTableName": {
+										"value": {
+											"value": "@item().TgtTableName",
+											"type": "Expression"
+										},
+										"type": "String"
+									},
+									"TgtTableSchema": {
+										"value": {
+											"value": "raw",
+											"type": "Expression"
+										},
+										"type": "String"
+									},
+									"BatchID": {
+										"value": {
+											"value": "@activity('LKP_Create_BatchID').output.firstRow.BatchID",
+											"type": "Expression"
+										},
+										"type": "Int16"
+									}
+								}
+							},
+							"linkedServiceName": {
+								"referenceName": "AzureSqlMI1",
+								"type": "LinkedServiceReference"
+							}
+						}
+					]
+				}
+			},
+			{
+				"name": "Execute PL_Validation",
+				"description": "Execute pipeline activty to execute validation all tables in the result set of Extract RDBMS Tables Details for Merge activity",
+				"type": "ExecutePipeline",
+				"dependsOn": [
+					{
+						"activity": "ForEach_TablePerformMerge",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"pipeline": {
+						"referenceName": "PL_Validation",
+						"type": "PipelineReference"
+					},
+					"waitOnCompletion": true,
+					"parameters": {
+						"P_filter_Clause": {
+							"value": "@concat('IsActive=1 and Tag = ''RDBMS''',' And SourceControlID in (',activity('Extract RDBMS Tables Details for Merge').output.resultSets[1].rows[0].ControlID_List,') ')",
+							"type": "Expression"
+						},
+						"P_run_type": {
+							"value": "@pipeline().parameters.P_run_type",
+							"type": "Expression"
+						},
+						"P_load_type": {
+							"value": "@pipeline().parameters.P_load_type",
+							"type": "Expression"
+						},
+						"P_BatchID": {
+							"value": "@activity('LKP_Create_BatchID').output.firstRow.BatchID",
+							"type": "Expression"
+						}
+					}
+				}
+			},
+			{
+				"name": "Extract RDBMS Tables Details for Merge",
+				"description": "Srcipt activity to extract details from configuration table where LastRefreshStatus is 'Merge is Pending'",
+				"type": "Script",
+				"dependsOn": [
+					{
+						"activity": "ForEach_ExtractDataFromOnPrem",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"linkedServiceName": {
+					"referenceName": "AzureSqlMI1",
+					"type": "LinkedServiceReference"
+				},
+				"typeProperties": {
+					"scripts": [
+						{
+							"type": "Query",
+							"text": {
+								"value": "SELECT * FROM Config.vw_RDBMSControlTable \nWHERE LastRefreshStatus = 'Merge is Pending';\n\nSELECT string_agg(controlid,',') as ControlID_List FROM Config.vw_RDBMSControlTable \nWHERE LastRefreshStatus = 'Merge is Pending'\n",
+								"type": "Expression"
+							}
+						}
+					]
+				}
+			}
+		],
+		"parameters": {
+			"P_FilterClause": {
+				"type": "string",
+				"defaultValue": "IsActive=1"
+			},
+			"P_run_type": {
+				"type": "string",
+				"defaultValue": "debug"
+			},
+			"P_load_type": {
+				"type": "string",
+				"defaultValue": "inc"
+			},
+			"P_ReRun": {
+				"type": "int",
+				"defaultValue": 0
+			}
+		},
+		"variables": {
+			"V_FilterClause": {
+				"type": "String"
+			},
+			"V_StartTime": {
+				"type": "String"
+			},
+			"V_EndTime": {
+				"type": "String"
+			}
+		},
+		"folder": {
+			"name": "Staging/RDBMS"
+		},
+		"annotations": [],
+		"lastPublishTime": "2024-04-11T12:24:27Z"
+	},
+	"type": "Microsoft.DataFactory/factories/pipelines"
+}

@@ -1,0 +1,21 @@
+{
+	"name": "test-learn-mi",
+	"properties": {
+		"globalParameters": {
+			"SubscriptionID": {
+				"type": "string",
+				"value": "abc"
+			},
+			"ResourceGroupName": {
+				"type": "string",
+				"value": "abc"
+			}
+		}
+	},
+	"location": "eastus",
+	"identity": {
+		"type": "SystemAssigned",
+		"principalId": "60a94b5f-bebf-4f1f-8ff0-07f1620cf8f4",
+		"tenantId": "30bf9f37-d550-4878-9494-1041656caf27"
+	}
+}
