@@ -1,0 +1,83 @@
+{
+	"name": "pipeline3",
+	"properties": {
+		"activities": [
+			{
+				"name": "Web1",
+				"type": "WebActivity",
+				"dependsOn": [
+					{
+						"activity": "Set variable1",
+						"dependencyConditions": [
+							"Failed"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"method": "POST",
+					"url": "https://prod-02.eastus.logic.azure.com:443/workflows/469a981fa0284f4db9c9b2d6b7944e20/triggers/When_a_HTTP_request_is_received/paths/invoke?api-version=2016-10-01&sp=%2Ftriggers%2FWhen_a_HTTP_request_is_received%2Frun&sv=1.0&sig=TbpMjOx4uUrVNJNXP7AhyEhVd8jwI6raupZEMaw0WZg",
+					"body": {
+						"value": "{\n\t\"Pipeline\": \"@{pipeline().Pipeline}\",\n\t\"ErrorMessage\": \"Pipeline Failed\",\n\t\"DataFactoryName\": \"@{pipeline().DataFactory}\",\n\t\"Runid\": \"@{pipeline().RunId}\"\n}",
+						"type": "Expression"
+					}
+				}
+			},
+			{
+				"name": "Web1_copy1",
+				"type": "WebActivity",
+				"dependsOn": [
+					{
+						"activity": "Set variable1",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"method": "POST",
+					"url": "https://prod-02.eastus.logic.azure.com:443/workflows/469a981fa0284f4db9c9b2d6b7944e20/triggers/When_a_HTTP_request_is_received/paths/invoke?api-version=2016-10-01&sp=%2Ftriggers%2FWhen_a_HTTP_request_is_received%2Frun&sv=1.0&sig=TbpMjOx4uUrVNJNXP7AhyEhVd8jwI6raupZEMaw0WZg",
+					"body": {
+						"value": "{\n\t\"Pipeline\": \"@{pipeline().Pipeline}\",\n\t\"ErrorMessage\": \"Succeeded\",\n\t\"DataFactoryName\": \"@{pipeline().DataFactory}\",\n\t\"Runid\": \"@{pipeline().RunId}\"\n}",
+						"type": "Expression"
+					}
+				}
+			},
+			{
+				"name": "Set variable1",
+				"type": "SetVariable",
+				"dependsOn": [],
+				"policy": {
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"variableName": "test",
+					"value": "select 1"
+				}
+			}
+		],
+		"variables": {
+			"test": {
+				"type": "String"
+			}
+		},
+		"annotations": []
+	}
+}
